@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Runs entirely on GitHub-hosted shared runners. No C toolchain and no hardware
+# requirement, so nothing here needs a self-hosted runner.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Formatting needs no dependency resolution, so it runs unconditionally and
+  # is meaningful even while `tuner-codec` is private (see the `build` job).
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust with rustfmt
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+  # clippy and the test suite both need the `tuner-codec` dependency, which is
+  # pinned by git URL in Cargo.toml.
+  #
+  # While that repository is PRIVATE this job cannot fetch it: a workflow's
+  # default GITHUB_TOKEN is scoped to its own repository and has no read access
+  # to a sibling private repo. The job is therefore expected to fail at the
+  # fetch step until `tuner-codec` is public.
+  #
+  # It needs no change when that happens — it starts passing on its own. If you
+  # want it green sooner, add a fine-grained PAT with read access to
+  # pelvo/tuner-codec as a repository secret and configure it as a git
+  # credential before the cargo steps.
+  #
+  # A fetch failure here is an access problem, not a defect in this crate. Read
+  # the `fmt` job's result as the signal until then.
+  build:
+    name: clippy + test (needs tuner-codec readable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust with clippy
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+          rustc --version && cargo clippy --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+
+      # Resolve the dependency graph first, so an authentication failure
+      # surfaces as its own step rather than as a confusing clippy error.
+      - name: Fetch dependencies
+        run: cargo fetch --locked || cargo fetch
+
+      # --all-targets covers the integration tests and the test-support tree,
+      # not just the library. Cargo.toml allows exactly one lint with a stated
+      # reason; everything else is an error.
+      - name: cargo clippy -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # This crate's fixtures are synthesized ARIB streams built in
+      # tests/support/, not recordings, so the suite is self-contained once the
+      # dependency resolves.
+      - name: cargo test
+        run: cargo test --all-features --verbose
+
+      - name: cargo doc
+        run: cargo doc --no-deps --all-features

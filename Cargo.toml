@@ -23,4 +23,11 @@ encoding_rs = "0.8"
 # DRCS glyphs are keyed by the MD5 of their bitmap, which is how a glyph gets
 # matched against a table of known ones.
 md5 = "0.7"
-tuner-codec = { git = "https://github.com/pelvo/tuner-codec.git", rev = "4e3b2bacc90431ecb1c9fbb8d020445836e116c1" }
+tuner-codec = { git = "https://github.com/pelvo/tuner-codec.git", rev = "bde9f691a021a49269e9abeea11ca64840e4f959" }
+
+# `as_chunks` (which clippy's chunks_exact_to_as_chunks suggests) was only
+# stabilized in Rust 1.88, so adopting it would raise this crate's effective
+# minimum toolchain for a purely stylistic gain. `chunks_exact` is correct and
+# clear.
+[lints.clippy]
+chunks_exact_to_as_chunks = "allow"

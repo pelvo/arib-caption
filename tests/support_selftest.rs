@@ -153,7 +153,7 @@ fn a_superimpose_pes_reassembles_without_one() {
 #[test]
 fn a_pes_longer_than_one_packet_reassembles_whole() {
     let mut body = vec![0x80u8, 0xFF, 0xF0];
-    body.extend(std::iter::repeat(0x5A).take(400));
+    body.extend(std::iter::repeat_n(0x5A, 400));
     let mut writer = TsWriter::new();
     writer.payload(0x0130, &caption_pes(&body, 90_000));
     let bytes = writer.finish();
