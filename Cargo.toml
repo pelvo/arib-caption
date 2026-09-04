@@ -1,0 +1,26 @@
+[package]
+name = "arib-caption"
+version = "0.1.0"
+edition = "2021"
+description = "ARIB STD-B24 closed caption decoder (ISDB caption / superimpose PES → caption model), pure Rust"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pelvo/arib-caption"
+authors = ["Anthony Hung <anthonyhungck@gmail.com>"]
+readme = "README.md"
+
+[lib]
+name = "arib_caption"
+path = "src/lib.rs"
+
+[[bin]]
+name = "arib-caption"
+path = "src/bin/arib-caption.rs"
+
+[dependencies]
+# JIS X 0208 / 0213 plane 2 → Unicode, reached through EUC-JP's byte forms.
+# Cheaper than an 8000-entry table and it is the same trick libaribb24-rs uses.
+encoding_rs = "0.8"
+# DRCS glyphs are keyed by the MD5 of their bitmap, which is how a glyph gets
+# matched against a table of known ones.
+md5 = "0.7"
+tuner-codec = { git = "https://github.com/pelvo/tuner-codec.git", rev = "4e3b2bacc90431ecb1c9fbb8d020445836e116c1" }
