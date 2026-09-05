@@ -112,7 +112,9 @@ fn is_top(caption: &Caption) -> bool {
     let mut all_top = true;
     for region in caption.regions.iter().filter(|r| !r.is_ruby) {
         any = true;
-        if region.y * 3 >= caption.plane_height {
+        // Saturating: `Caption` is public, so a caller can hand this renderer
+        // a region the decoder would never emit.
+        if region.y.saturating_mul(3) >= caption.plane_height {
             all_top = false;
         }
     }
