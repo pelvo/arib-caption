@@ -65,6 +65,26 @@ fn management_format_to_swf(raw: u8) -> Option<u8> {
 }
 
 /// Direction selected by every defined SWF value in Table 7-17.
+/// Largest dimension, in dots, that any real ARIB caption plane uses.
+///
+/// ARIB STD-B24's display formats top out far below this; the cap exists only
+/// so that a malformed stream cannot drive the layout arithmetic into an
+/// overflow. Every CSI geometry parameter passes through [`plane_dots`].
+const MAX_PLANE_DOTS: i32 = 8192;
+
+/// Clamps a CSI geometry parameter to a dimension a caption plane could have.
+///
+/// The parameters arrive as decimal digits in the statement body, so they are
+/// entirely stream-controlled: `param as i32` was both a silently narrowing
+/// cast and the source of the downstream multiply overflows. Anything beyond
+/// `MAX_PLANE_DOTS` cannot describe a real plane, so it is pinned there rather
+/// than rejected -- the caption is still worth rendering as best it can be.
+fn plane_dots(param: u32) -> i32 {
+    i32::try_from(param)
+        .unwrap_or(MAX_PLANE_DOTS)
+        .clamp(0, MAX_PLANE_DOTS)
+}
+
 fn writing_mode_for_swf(swf: u8) -> Option<WritingMode> {
     match swf {
         0 | 2 | 4 | 5 | 7 | 9 | 11 => Some(WritingMode::HorizontalTb),
@@ -734,7 +754,10 @@ impl Decoder {
             let b = data[offset];
             if (0x30..=0x39).contains(&b) {
                 if param_count <= 1 {
-                    param2 = param2 * 10 + (b & 0x0f) as u32;
+                    // Saturating: the digit run is stream-controlled and has no
+                    // length limit, so a plain `* 10 +` overflows u32 before
+                    // any range check downstream can reject the value.
+                    param2 = param2.saturating_mul(10).saturating_add((b & 0x0f) as u32);
                 }
             } else if b == 0x20 {
                 if param_count == 0 {
@@ -766,19 +789,19 @@ impl Decoder {
                 }
             }
             csi::SDF => {
-                self.area_width = param1 as i32;
-                self.area_height = param2 as i32;
+                self.area_width = plane_dots(param1);
+                self.area_height = plane_dots(param2);
             }
             csi::SSM => {
-                self.char_width = param1 as i32;
-                self.char_height = param2 as i32;
+                self.char_width = plane_dots(param1);
+                self.char_height = plane_dots(param2);
             }
-            csi::SHS => self.char_h_spacing = param1 as i32,
-            csi::SVS => self.char_v_spacing = param1 as i32,
+            csi::SHS => self.char_h_spacing = plane_dots(param1),
+            csi::SVS => self.char_v_spacing = plane_dots(param1),
             csi::SDP => {
-                self.area_x = param1 as i32;
+                self.area_x = plane_dots(param1);
                 if param_count >= 2 {
-                    self.area_y = param2 as i32;
+                    self.area_y = plane_dots(param2);
                 }
                 if !self.pos_inited {
                     // The pen starts at the first cell on the active character
@@ -786,7 +809,9 @@ impl Decoder {
                     self.set_active_position(0, 0);
                 }
             }
-            csi::ACPS => self.set_absolute_pos_dots(param1 as i32, param2 as i32),
+            // Clamped like every other geometry parameter: an unbounded ACPS
+            // reached the renderers, where `region.y * 3` then overflowed.
+            csi::ACPS => self.set_absolute_pos_dots(plane_dots(param1), plane_dots(param2)),
             csi::ORN => {
                 if param1 == 0 {
                     self.style.stroke = false;
@@ -1159,16 +1184,33 @@ impl Decoder {
 
     /// Set APS coordinates. Its first parameter counts in the line direction;
     /// its second counts along the character path.
+    ///
+    /// Saturating throughout: `plane_dots` already bounds every geometry
+    /// parameter this multiplies, so an overflow here would mean that bound
+    /// was bypassed. Saturating rather than wrapping keeps a malformed stream
+    /// pinned to the edge of the plane instead of wrapping to its opposite
+    /// side.
     fn set_active_position(&mut self, line: i32, character: i32) {
         self.pos_inited = true;
         match self.writing_mode() {
             WritingMode::HorizontalTb => {
-                self.pos_x = self.area_x + character * self.section_width();
-                self.pos_y = self.area_y + (line + 1) * self.section_height();
+                self.pos_x = self
+                    .area_x
+                    .saturating_add(character.saturating_mul(self.section_width()));
+                self.pos_y = self
+                    .area_y
+                    .saturating_add(line.saturating_add(1).saturating_mul(self.section_height()));
             }
             WritingMode::VerticalRl => {
-                self.pos_x = self.area_x + self.area_width - (line + 1) * self.section_width();
-                self.pos_y = self.area_y + (character + 1) * self.section_height();
+                self.pos_x = self
+                    .area_x
+                    .saturating_add(self.area_width)
+                    .saturating_sub(line.saturating_add(1).saturating_mul(self.section_width()));
+                self.pos_y = self.area_y.saturating_add(
+                    character
+                        .saturating_add(1)
+                        .saturating_mul(self.section_height()),
+                );
             }
         }
     }
@@ -1750,5 +1792,61 @@ mod tests {
             .expect("decodes")
             .expect("a caption");
         assert_eq!(caption.text, "亜");
+    }
+
+    #[test]
+    fn a_csi_geometry_parameter_beyond_any_caption_plane_cannot_overflow_the_layout() {
+        // CSI SSM assigned char_height straight from a stream parameter, and
+        // APS then evaluated (line + 1) * section_height() in i32. A cell size
+        // above roughly 33 million overflowed that multiply. The parameter is
+        // attacker-controlled: it arrives in the caption statement.
+        let mut body = vec![0x9b];
+        body.extend_from_slice(b"0;2000000000");
+        body.extend_from_slice(&[0x20, b'W']); // SP, SSM
+        body.extend_from_slice(&[c0::APS, 0x7f, 0x21]); // APS, line 63
+        body.extend_from_slice(&[0x1b, 0x24, 0x42, 0x0f, 0x30, 0x21]);
+
+        let mut decoder = Decoder::new(CaptionKind::Caption, Options::default());
+        // The only requirement is that a malformed plane geometry does not
+        // panic; whether it yields a caption is not this test's business.
+        let _ = decoder.decode(&statement_pes(&body), None);
+    }
+
+    #[test]
+    fn a_csi_parameter_with_a_long_digit_run_cannot_overflow_the_accumulator() {
+        // The decimal accumulator was `param2 * 10 + digit` on a u32, so a
+        // sufficiently long digit run overflowed before any range check saw it.
+        let mut body = vec![0x9b];
+        body.extend_from_slice(b"0;99999999999999999999");
+        body.extend_from_slice(&[0x20, b'W']);
+        body.extend_from_slice(&[0x1b, 0x24, 0x42, 0x0f, 0x30, 0x21]);
+
+        let mut decoder = Decoder::new(CaptionKind::Caption, Options::default());
+        let _ = decoder.decode(&statement_pes(&body), None);
+    }
+
+    #[test]
+    fn an_absolute_position_beyond_the_plane_is_clamped_before_it_reaches_a_renderer() {
+        // CSI ACPS set the caption position straight from two stream
+        // parameters. An unbounded value survived into Caption::regions, where
+        // the WebVTT renderer's `region.y * 3` overflowed i32.
+        let mut body = vec![0x9b];
+        body.extend_from_slice(b"2000000000;2000000000");
+        body.extend_from_slice(&[0x20, b'a']); // SP, ACPS
+        body.extend_from_slice(&[0x1b, 0x24, 0x42, 0x0f, 0x30, 0x21]);
+
+        let mut decoder = Decoder::new(CaptionKind::Caption, Options::default());
+        let decoded = decoder.decode(&statement_pes(&body), None);
+
+        if let Ok(Some(caption)) = decoded {
+            for region in &caption.regions {
+                assert!(
+                    region.y <= MAX_PLANE_DOTS,
+                    "region.y {} escaped the plane clamp",
+                    region.y
+                );
+                assert!(region.x <= MAX_PLANE_DOTS, "region.x {} escaped", region.x);
+            }
+        }
     }
 }

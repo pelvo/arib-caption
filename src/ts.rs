@@ -130,10 +130,14 @@ impl ServiceScanner {
         if section.is_empty() || section[0] != 0x02 {
             return;
         }
-        let service_id = ((section[3] as u16) << 8) | section[4] as u16;
+        // section_body() enforces the 8-byte minimum, so the service-id read
+        // below must follow it: a section_length of 0 or 1 yields a 3- or
+        // 4-byte section, and indexing [3] and [4] first panicked on it. The
+        // bytes read here sit inside the header section_body has validated.
         let Some(body) = section_body(section) else {
             return;
         };
+        let service_id = ((section[3] as u16) << 8) | section[4] as u16;
         if body.len() < 4 {
             return;
         }
@@ -623,5 +627,23 @@ mod tests {
         assert_eq!(first[..4], a[..4]);
         let second = split.next_packet().expect("second packet");
         assert_eq!(second[..4], b[..4]);
+    }
+
+    #[test]
+    fn a_pmt_too_short_to_hold_a_service_id_is_ignored_rather_than_panicking() {
+        // parse_pmt read section[3..=4] for the service id before
+        // section_body() validated the 8-byte minimum, so a section_length of
+        // 0 or 1 produced a 3- or 4-byte "PMT" that indexed past its end.
+        // Slice indexing is bounds-checked in every profile, so this panicked
+        // in release too, not only in debug.
+        const PMT_PID: u16 = 0x0100;
+
+        for section_length in [0x00u8, 0x01] {
+            let mut scanner = ServiceScanner::new();
+            feed_pat(&mut scanner, PMT_PID, 0);
+            let truncated = [0x02, 0xb0, section_length];
+            scanner.push(&ts_packet(PMT_PID, true, 0, &section_start(&truncated)));
+            assert_eq!(scanner.caption_pid(), None);
+        }
     }
 }
