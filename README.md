@@ -20,9 +20,8 @@ LICENSE file of its own.
 
 Compared with the vendored revision, this crate:
 
-- replaced the crate-local MPEG-TS PES assembler with the shared engine from
-  the sibling crate [`tuner-codec`](https://github.com/pelvo/tuner-codec),
-  which supplies MPEG-TS/PES framing to several crates in the same family;
+- replaced the crate-local MPEG-TS PES assembler with the engine from
+  [`tuner-codec`](https://github.com/pelvo/tuner-codec);
 - added `shared_pes_adapter.rs` to preserve the existing `PesAssembler`,
   `PesPacket`, `push`, `flush`, `pts_ms`, and discontinuity-counting API;
 - removed the duplicate PES engine and the temporary feature switch after
@@ -62,10 +61,9 @@ recording), JSON keeps all of it by rendering none of it — the model itself,
 for a consumer that will draw the caption somewhere this process cannot reach
 — and a pixel renderer keeps all of it as pixels.
 
-The crate has no C dependencies or native bindings. Its one dependency
-beyond ordinary crates.io crates is the sibling crate
-[`tuner-codec`](https://github.com/pelvo/tuner-codec), which supplies the
-shared MPEG-TS/PES engine.
+The crate has no C dependencies or native bindings. Its one dependency not
+published on crates.io is [`tuner-codec`](https://github.com/pelvo/tuner-codec),
+which supplies the MPEG-TS/PES engine.
 
 ## Layout
 
