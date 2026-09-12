@@ -2,11 +2,14 @@
 name = "arib-caption"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 description = "ARIB STD-B24 closed caption decoder (ISDB caption / superimpose PES → caption model), pure Rust"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/pelvo/arib-caption"
 authors = ["Anthony Hung <anthonyhungck@gmail.com>"]
 readme = "README.md"
+keywords = ["arib", "isdb-t", "caption", "subtitle", "broadcast"]
+categories = ["multimedia", "parser-implementations", "text-processing"]
 
 [lib]
 name = "arib_caption"
@@ -24,10 +27,3 @@ encoding_rs = "0.8"
 # matched against a table of known ones.
 md5 = "0.7"
 tuner-codec = { git = "https://github.com/pelvo/tuner-codec.git", rev = "bde9f691a021a49269e9abeea11ca64840e4f959" }
-
-# `as_chunks` (which clippy's chunks_exact_to_as_chunks suggests) was only
-# stabilized in Rust 1.88, so adopting it would raise this crate's effective
-# minimum toolchain for a purely stylistic gain. `chunks_exact` is correct and
-# clear.
-[lints.clippy]
-chunks_exact_to_as_chunks = "allow"

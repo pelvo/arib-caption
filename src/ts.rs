@@ -117,7 +117,7 @@ impl ServiceScanner {
         };
         // program_number(2) + PMT PID(2) per entry, after the 5 bytes of
         // table-specific header that section_body already skipped.
-        for entry in body.chunks_exact(4) {
+        for entry in body.as_chunks::<4>().0 {
             let program = ((entry[0] as u16) << 8) | entry[1] as u16;
             let pid = (((entry[2] & 0x1f) as u16) << 8) | entry[3] as u16;
             if program != 0 && !self.pmt_pids.iter().any(|&(pr, _)| pr == program) {
