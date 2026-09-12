@@ -147,7 +147,7 @@ fn synthetic_caption_stream_matches_the_recorded_pes_sequence() {
     let bytes = fixtures::caption_ts();
     let mut assembler = PesAssembler::new(fixtures::CAPTION_PID);
     let mut packets = Vec::new();
-    for chunk in bytes.chunks_exact(TS_PACKET_SIZE) {
+    for chunk in bytes.as_chunks::<TS_PACKET_SIZE>().0 {
         if let Some(packet) = assembler.push(chunk) {
             packets.push(packet);
         }
